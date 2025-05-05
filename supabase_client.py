@@ -1,20 +1,21 @@
 # supabase_client.py
 # -*- coding: utf-8 -*-
 
+from datetime import datetime
 import os
+import traceback
 import pandas as pd
 import numpy as np
 from supabase import create_client, Client
-import traceback
 
 # Supabase configuration – read from env vars or use defaults for local testing
 SUPABASE_URL = os.environ.get(
     "SUPABASE_URL",
-    "https://njluqaekknpssqcygmvz.supabase.co"
+    "https://njluqaekknpssqcygymvz.supabase.co"
 )
 SUPABASE_KEY = os.environ.get(
     "SUPABASE_SERVICE_KEY",
-    "eyJhbGciO...IjoyMDYyMDUxNTI2fQ.NmQn4HppxhRXS1gGwyG83CBXHS-i09iIerqFlRdQBeg"
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJub2xnbHlwZXclMjBzZXJ2aWNlIiwiaXNzIjoibm9jZWxpZXJzIiwiaWF0IjoxNjc3OTMzNTI2LCJleHAiOjE5MzQ1NDE1MjZ9.NmQn4HppxhRXS1gGwyG83CBXHS-i09iIerqFlRdQBeg"
 )
 
 # Table names
@@ -23,6 +24,7 @@ LOGS_TABLE    = "dashboard_logs"
 
 # Global client handle
 supabase: Client | None = None
+
 
 def init_supabase_client() -> Client | None:
     """
@@ -40,6 +42,7 @@ def init_supabase_client() -> Client | None:
         print(f"Error initializing Supabase client: {e}")
         return None
 
+
 def get_supabase_client() -> Client | None:
     """
     Returns the initialized Supabase client, initializing on first call.
@@ -48,6 +51,7 @@ def get_supabase_client() -> Client | None:
     if supabase is None:
         return init_supabase_client()
     return supabase
+
 
 def upsert_tickets_data(df: pd.DataFrame) -> bool:
     """
@@ -74,6 +78,7 @@ def upsert_tickets_data(df: pd.DataFrame) -> bool:
         traceback.print_exc()
         return False
 
+
 def fetch_all_tickets_data() -> pd.DataFrame | None:
     """
     Fetches all tickets from Supabase and returns as a DataFrame.
@@ -94,6 +99,7 @@ def fetch_all_tickets_data() -> pd.DataFrame | None:
         print("Exception on fetch_all_tickets_data:", e)
         traceback.print_exc()
         return None
+
 
 def log_event(level: str, message: str, details: dict | None = None) -> None:
     """
