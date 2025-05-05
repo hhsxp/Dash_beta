@@ -15,9 +15,9 @@ app = dash.Dash(
     external_stylesheets=[dbc.themes.BOOTSTRAP],
     suppress_callback_exceptions=True
 )
-server = app.server  # para o Render ou Heroku
+server = app.server  # para deploy
 
-# --- Layout simplificado (ajuste IDs conforme seu código) ---
+# Layout do app
 app.layout = dbc.Container(fluid=True, children=[
     html.H1("Dashboard Executivo – Monitoramento de Suporte", className="mt-4"),
     html.Hr(),
@@ -54,10 +54,10 @@ app.layout = dbc.Container(fluid=True, children=[
             html.Div(id="upload-status", className="mt-3")
         ], width=12)
     ]),
-    # ... o restante do seu dashboard (filtros, gráficos, tabelas etc.) ...
+    # ... restante do dashboard
 ])
 
-# --- Callback de processamento e inserção ---
+# Callback para processar e inserir no Supabase
 @app.callback(
     Output("upload-status", "children"),
     Input("process-button", "n_clicks"),
@@ -66,39 +66,58 @@ app.layout = dbc.Container(fluid=True, children=[
     prevent_initial_call=True
 )
 def handle_upload(n_clicks, piloto_contents, sla_contents):
-    # Verifica se os dois arquivos foram enviados
+    # Verifica envio
     if not piloto_contents or not sla_contents:
         return dbc.Alert("Por favor, envie ambos os arquivos.", color="warning")
 
-    # Log de início
+    # Decodifica base64
+    try:
+        _, piloto_b64 = piloto_contents.split(',', 1)
+        piloto_bytes = base64.b64decode(piloto_b64)
+        _, sla_b64 = sla_contents.split(',', 1)
+        sla_bytes = base64.b64decode(sla_b64)
+    except Exception:
+        msg = "Falha ao decodificar arquivos. Verifique o formato enviado."
+        supabase_client.log_event("error", msg)
+        return dbc.Alert(msg, color="danger")
+
     supabase_client.log_event(
         "info",
         "Iniciando processamento de arquivos",
-        {"piloto": piloto_contents[:30], "sla": sla_contents[:30]}
+        {"piloto_len": len(piloto_bytes), "sla_len": len(sla_bytes)}
     )
 
-    # Processa em DataFrame
-    df = process_uploaded_files(piloto_contents, sla_contents)
+    # Processa
+    try:
+        df = process_uploaded_files(piloto_bytes, sla_bytes)
+    except Exception as e:
+        err = str(e)
+        supabase_client.log_event("error", f"Erro no processamento: {err}")
+        return dbc.Alert(f"Erro: {err}", color="danger")
 
     if df.empty:
-        err = (
-            "Erro: nenhum ticket encontrado após o merge. "
-            "Verifique se a coluna 'Chave' existe e coincide em ambos os arquivos."
+        msg = (
+            "Nenhum ticket encontrado após o merge. "
+            "Verifique se a coluna 'Chave' existe e coincide."
         )
-        supabase_client.log_event("error", err)
-        return dbc.Alert(err, color="danger")
+        supabase_client.log_event("warning", msg)
+        return dbc.Alert(msg, color="danger")
 
-    # Converte para lista de dicts e insere no Supabase
-    records = df.to_dict(orient="records")
+    # Insere no Supabase
     try:
-        inserted = supabase_client.insert_tickets(records)
-        msg = f"{len(inserted)} tickets inseridos com sucesso!"
+        inserted = supabase_client._client.table(
+            "tickets"
+        ).insert(
+            df.to_dict(orient="records")
+        ).execute()
+        count = len(inserted.data if hasattr(inserted, 'data') else [])
+        msg = f"{count} tickets inseridos com sucesso!"
         supabase_client.log_event("info", msg)
         return dbc.Alert(msg, color="success")
     except Exception as e:
-        err = f"Falha ao salvar no banco: {e}"
-        supabase_client.log_event("error", err, {"trace": str(e)})
-        return dbc.Alert(err, color="danger")
+        err = str(e)
+        supabase_client.log_event("error", f"Falha ao salvar no banco: {err}")
+        return dbc.Alert(f"Falha ao salvar no banco: {err}", color="danger")
 
 
 if __name__ == "__main__":
