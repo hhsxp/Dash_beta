@@ -1,117 +1,123 @@
+# supabase_client.py
 # -*- coding: utf-8 -*-
+
+import os
+import traceback
+from datetime import datetime
 import pandas as pd
 import numpy as np
-import io
-import base64
-from datetime import datetime
+from supabase import create_client, Client
 
-def parse_excel_content(content_string: str) -> io.BytesIO:
-    """Parses a base64-encoded Excel file content into a BytesIO buffer."""
-    _, content_data = content_string.split(",", 1)
-    decoded = base64.b64decode(content_data)
-    return io.BytesIO(decoded)
+# Supabase configuration – read from env vars or use defaults for local testing
+SUPABASE_URL = os.environ.get(
+    "SUPABASE_URL",
+    "https://njluqaekknpssqcygmvz.supabase.co"
+)
+SUPABASE_KEY = os.environ.get(
+    "SUPABASE_SERVICE_KEY",
+    "eyJhbGciO...IjoyMDYyMDUxNTI2fQ.NmQn4HppxhRXS1gGwyG83CBXHS-i09iIerqFlRdQBeg"
+)
 
-def process_uploaded_files(piloto_content_str: str, sla_content_str: str) -> pd.DataFrame:
+# Table names
+TICKETS_TABLE = "tickets"
+LOGS_TABLE    = "dashboard_logs"
+
+# Global client handle
+supabase: Client | None = None
+
+def init_supabase_client() -> Client | None:
     """
-    Processes uploaded Piloto and SLA Excel files, merges them, and calculates
-    SLA compliance, aging, lead time, and period columns.
-    Returns a DataFrame ready for dashboard ingestion.
+    Initializes the Supabase client and returns it.
     """
+    global supabase
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        print("Error: Missing SUPABASE_URL or SUPABASE_SERVICE_KEY.")
+        return None
     try:
-        # Decode uploads
-        piloto_io = parse_excel_content(piloto_content_str)
-        sla_io    = parse_excel_content(sla_content_str)
-
-        # --- Dynamic sheet loading for Piloto ---
-        xls_piloto   = pd.ExcelFile(piloto_io)
-        piloto_sheet = xls_piloto.sheet_names[0]
-        df_piloto    = pd.read_excel(piloto_io, sheet_name=piloto_sheet)
-        if any(col.startswith("Unnamed") for col in df_piloto.columns):
-            df_piloto = pd.read_excel(piloto_io, sheet_name=piloto_sheet, header=1)
-
-        # Auto-rename "Key" → "Chave" if necessário
-        if "Chave" not in df_piloto.columns and "Key" in df_piloto.columns:
-            df_piloto.rename(columns={"Key": "Chave"}, inplace=True)
-
-        # --- Dynamic sheet loading for SLA ---
-        xls_sla    = pd.ExcelFile(sla_io)
-        sla_sheet  = "Tickets" if "Tickets" in xls_sla.sheet_names else xls_sla.sheet_names[0]
-        df_sla     = pd.read_excel(sla_io, sheet_name=sla_sheet)
-
-        # Prepare SLA data
-        df_sla = df_sla.rename(columns={
-            "Key": "Chave",
-            "Tempo até a primeira resposta": "HorasPrimeiraResposta_Original",
-            "Tempo de resolução":             "HorasResolucao_Original",
-            "SLA":                             "CumpriuSLA_Resolucao_Original",
-            "Primeira Resposta":               "CumpriuSLA_PrimeiraResposta_Original"
-        })
-        df_sla_sel = df_sla[[
-            "Chave",
-            "HorasPrimeiraResposta_Original",
-            "HorasResolucao_Original",
-            "CumpriuSLA_Resolucao_Original",
-            "CumpriuSLA_PrimeiraResposta_Original"
-        ]]
-
-        # Merge
-        df = pd.merge(df_piloto, df_sla_sel, on="Chave", how="left")
-
-        # Parse dates
-        for col in ["Criado", "Resolvido", "Atualizado(a)"]:
-            if col in df.columns:
-                df[col] = pd.to_datetime(df[col], errors="coerce")
-
-        # SLA mapping by priority
-        sla_map      = {"Highest":4, "High":6, "Medium":16, "Low":24, "Lowest":40}
-        sla_resp_map = {k:v/2 for k,v in sla_map.items()}
-        df["SLA_Horas_Resolucao"]        = df["Prioridade"].map(sla_map)
-        df["SLA_Horas_Primeira_Resposta"] = df["Prioridade"].map(sla_resp_map)
-
-        # Calculated metrics
-        df["HorasResolucao_Calculated"] = (
-            df["Resolvido"] - df["Criado"]
-        ).dt.total_seconds() / 3600
-
-        def check_sla_res(row):
-            sla = row["SLA_Horas_Resolucao"]
-            hr  = row["HorasResolucao_Calculated"]
-            if pd.isna(sla): return "N/A"
-            if pd.isna(hr):  return "Pendente"
-            return "Sim" if hr <= sla else "Não"
-        df["CumpriuSLA_Resolucao_Calculated"] = df.apply(check_sla_res, axis=1)
-
-        def check_sla_resp(row):
-            sla2 = row["SLA_Horas_Primeira_Resposta"]
-            hpr  = row["HorasPrimeiraResposta_Original"]
-            if pd.isna(sla2): return "N/A"
-            if pd.isna(hpr):  return "Pendente"
-            return "Sim" if hpr <= sla2 else "Não"
-        df["CumpriuSLA_PrimeiraResposta_Calculated"] = df.apply(check_sla_resp, axis=1)
-
-        # Ticket status & aging / lead time
-        closed_states = ["Concluído","Resolvido","Fechado","Cancelado"]
-        df["Is_Open"] = ~df["Status"].isin(closed_states)
-        now = datetime.now()
-
-        df["Aging_Horas"] = np.where(
-            df["Is_Open"],
-            (now - df["Criado"]).dt.total_seconds() / 3600,
-            np.nan
-        )
-        df["LeadTime_Horas"] = np.where(
-            ~df["Is_Open"],
-            (df["Resolvido"] - df["Criado"]).dt.total_seconds() / 3600,
-            np.nan
-        ).clip(lower=0)
-
-        # Period columns
-        df["Ano_Criacao"]       = df["Criado"].dt.year
-        df["Trimestre_Criacao"] = df["Criado"].dt.quarter
-        df["Mes_Ano_Criacao"]   = df["Criado"].dt.strftime("%Y-%m")
-
-        return df
-
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        print("Supabase client initialized successfully.")
+        return supabase
     except Exception as e:
-        print(f"Error processing files: {e}")
-        return pd.DataFrame()
+        print(f"Error initializing Supabase client: {e}")
+        return None
+
+def get_supabase_client() -> Client | None:
+    """
+    Returns the initialized Supabase client, initializing on first call.
+    """
+    global supabase
+    if supabase is None:
+        return init_supabase_client()
+    return supabase
+
+def upsert_tickets_data(df: pd.DataFrame) -> bool:
+    """
+    Inserts all rows of the DataFrame into the tickets table.
+    (Option 2: use pure INSERT instead of UPSERT.)
+    """
+    client = get_supabase_client()
+    if client is None:
+        print("Supabase client not initialized. Cannot insert data.")
+        return False
+    if df.empty:
+        print("DataFrame is empty. Skipping insert.")
+        return False
+
+    records = df.to_dict("records")
+    try:
+        resp = client.table(TICKETS_TABLE).insert(records).execute()
+        if hasattr(resp, "error") and resp.error:
+            print("Error inserting tickets:", resp.error)
+            return False
+        return True
+    except Exception as e:
+        print("Exception on insert_tickets_data:", e)
+        traceback.print_exc()
+        return False
+
+def fetch_all_tickets_data() -> pd.DataFrame | None:
+    """
+    Fetches all tickets from Supabase and returns as a DataFrame.
+    """
+    client = get_supabase_client()
+    if client is None:
+        print("Supabase client not initialized. Cannot fetch data.")
+        return None
+
+    try:
+        resp = client.table(TICKETS_TABLE).select("*").order("Criado", desc=False).execute()
+        if hasattr(resp, "error") and resp.error:
+            print("Error fetching tickets:", resp.error)
+            return None
+        data = resp.data or []
+        return pd.DataFrame(data)
+    except Exception as e:
+        print("Exception on fetch_all_tickets_data:", e)
+        traceback.print_exc()
+        return None
+
+def log_event(level: str, message: str, details: dict | None = None) -> None:
+    """
+    Logs an event into the dashboard_logs table (or prints on failure).
+    """
+    client = get_supabase_client()
+    log_record = {
+        "level":     level,
+        "message":   message,
+        "details":   details or {},
+        "timestamp": datetime.now().isoformat()
+    }
+
+    # Always print locally
+    print(f"[{level.upper()}] {message}", details or "")
+
+    if client is None:
+        return
+
+    try:
+        resp = client.table(LOGS_TABLE).insert(log_record).execute()
+        if hasattr(resp, "error") and resp.error:
+            print("Error logging to Supabase:", resp.error)
+    except Exception as e:
+        print("Exception logging to Supabase:", e)
+        traceback.print_exc()
