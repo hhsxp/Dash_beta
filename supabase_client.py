@@ -1,143 +1,122 @@
+# supabase_client.py
 # -*- coding: utf-8 -*-
+
 import os
 import pandas as pd
 import numpy as np
-import traceback
-from datetime import datetime
 from supabase import create_client, Client
+import traceback
 
-# Environment variables for Supabase
-# SUPABASE_URL must be set, and SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SERVICE_KEY for service access
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY")
+# Supabase configuration – read from env vars or use defaults for local testing
+SUPABASE_URL = os.environ.get(
+    "SUPABASE_URL",
+    "https://njluqaekknpssqcygmvz.supabase.co"
+)
+SUPABASE_KEY = os.environ.get(
+    "SUPABASE_SERVICE_KEY",
+    "eyJhbGciO...IjoyMDYyMDUxNTI2fQ.NmQn4HppxhRXS1gGwyG83CBXHS-i09iIerqFlRdQBeg"
+)
 
 # Table names
 TICKETS_TABLE = "tickets"
-LOGS_TABLE = "dashboard_logs"
+LOGS_TABLE    = "dashboard_logs"
 
-# Supabase client placeholder
-supabase_client: Client | None = None
-
+# Global client handle
+supabase: Client | None = None
 
 def init_supabase_client() -> Client | None:
-    """Initializes the Supabase client using environment variables."""
-    global supabase_client
+    """
+    Initializes the Supabase client and returns it.
+    """
+    global supabase
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print(
-            "Error: SUPABASE_URL and Supabase service role key (SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SERVICE_KEY) are required."
-        )
+        print("Error: Missing SUPABASE_URL or SUPABASE_SERVICE_KEY.")
         return None
     try:
-        supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
         print("Supabase client initialized successfully.")
-        return supabase_client
+        return supabase
     except Exception as e:
         print(f"Error initializing Supabase client: {e}")
-        print(traceback.format_exc())
-        supabase_client = None
         return None
 
-
 def get_supabase_client() -> Client | None:
-    """Returns the initialized Supabase client, initializing if needed."""
-    global supabase_client
-    if supabase_client is None:
+    """
+    Returns the initialized Supabase client, initializing on first call.
+    """
+    global supabase
+    if supabase is None:
         return init_supabase_client()
-    return supabase_client
-
+    return supabase
 
 def upsert_tickets_data(df: pd.DataFrame) -> bool:
-    """Upserts DataFrame rows into the Supabase tickets table."""
+    """
+    Inserts all rows of the DataFrame into the tickets table.
+    (Option 2: use pure INSERT instead of UPSERT.)
+    """
     client = get_supabase_client()
-    if not client:
-        print("Supabase client not initialized. Skipping upsert.")
+    if client is None:
+        print("Supabase client not initialized. Cannot insert data.")
         return False
     if df.empty:
-        print("DataFrame is empty. Skipping upsert.")
+        print("DataFrame is empty. Skipping insert.")
         return False
 
-    df_clean = df.copy()
-    # Convert datetime columns to ISO strings
-    for col in df_clean.select_dtypes(include=["datetime64[ns]", "datetime64[ns, UTC]"]):
-        df_clean[col] = df_clean[col].dt.strftime("%Y-%m-%dT%H:%M:%S.%f")
-    # Replace NaN/NaT and infinities
-    df_clean = df_clean.replace({pd.NaT: None})
-    df_clean = df_clean.replace([np.inf, -np.inf], np.nan).fillna(value=None)
-    # Ensure booleans
-    for col in df_clean.select_dtypes(include=["bool"]):
-        df_clean[col] = df_clean[col].astype(bool)
-
-    records = df_clean.to_dict(orient="records")
-    print(f"Attempting to upsert {len(records)} records to '{TICKETS_TABLE}' table...")
+    records = df.to_dict("records")
     try:
-        response = client.table(TICKETS_TABLE).upsert(records).execute()
-        error = getattr(response, 'error', None)
-        if error:
-            print(f"Error during upsert: {error}")
-            log_event("error", f"Upsert failed: {error}")
+        resp = client.table(TICKETS_TABLE).insert(records).execute()
+        if hasattr(resp, "error") and resp.error:
+            print("Error inserting tickets:", resp.error)
             return False
-        print(f"Successfully upserted {len(records)} records.")
         return True
     except Exception as e:
-        print(f"Exception during Supabase upsert: {e}")
-        print(traceback.format_exc())
-        log_event("error", f"Upsert exception: {e}")
+        print("Exception on insert_tickets_data:", e)
+        traceback.print_exc()
         return False
 
-
-def fetch_all_tickets_data() -> pd.DataFrame:
-    """Fetches all rows from the Supabase tickets table."""
+def fetch_all_tickets_data() -> pd.DataFrame | None:
+    """
+    Fetches all tickets from Supabase and returns as a DataFrame.
+    """
     client = get_supabase_client()
-    if not client:
+    if client is None:
         print("Supabase client not initialized. Cannot fetch data.")
-        return pd.DataFrame()
+        return None
 
-    print(f"Fetching all records from '{TICKETS_TABLE}'...")
     try:
-        response = client.table(TICKETS_TABLE).select("*").execute()
-        data = getattr(response, 'data', None)
-        if data:
-            df = pd.DataFrame(data)
-            print(f"Fetched {len(df)} records.")
-            # Attempt to parse date strings
-            for col in df.columns:
-                if df[col].dtype == object:
-                    parsed = pd.to_datetime(df[col], errors='coerce')
-                    if parsed.notna().sum() > len(df) * 0.5:
-                        df[col] = parsed
-            return df
-        error = getattr(response, 'error', None)
-        if error:
-            print(f"Error fetching data: {error}")
-            log_event("error", f"Fetch failed: {error}")
-        else:
-            print("No data found or unexpected response.")
-        return pd.DataFrame()
+        resp = client.table(TICKETS_TABLE).select("*").order("Criado", desc=False).execute()
+        if hasattr(resp, "error") and resp.error:
+            print("Error fetching tickets:", resp.error)
+            return None
+        data = resp.data or []
+        return pd.DataFrame(data)
     except Exception as e:
-        print(f"Exception during fetch: {e}")
-        print(traceback.format_exc())
-        log_event("error", f"Fetch exception: {e}")
-        return pd.DataFrame()
+        print("Exception on fetch_all_tickets_data:", e)
+        traceback.print_exc()
+        return None
 
-
-def log_event(level: str, message: str, details: dict = None) -> None:
-    """Logs events to the Supabase dashboard_logs table or prints fallback."""
+def log_event(level: str, message: str, details: dict | None = None) -> None:
+    """
+    Logs an event into the dashboard_logs table (or prints on failure).
+    """
     client = get_supabase_client()
-    record = {
-        "timestamp": datetime.now().isoformat(),
-        "level": level,
-        "message": message,
-        "details": details or {}
+    log_record = {
+        "level":     level,
+        "message":   message,
+        "details":   details or {},
+        "timestamp": datetime.now().isoformat()
     }
-    if not client:
-        print(f"[LOG {level}] {message} {details or ''}")
+
+    # Always print locally
+    print(f"[{level.upper()}] {message}", details or "")
+
+    if client is None:
         return
+
     try:
-        resp = client.table(LOGS_TABLE).insert(record).execute()
-        err = getattr(resp, 'error', None)
-        if err:
-            print(f"Error logging event: {err}")
-            print(f"Fallback: [LOG {level}] {message} {details or ''}")
+        resp = client.table(LOGS_TABLE).insert(log_record).execute()
+        if hasattr(resp, "error") and resp.error:
+            print("Error logging to Supabase:", resp.error)
     except Exception as e:
-        print(f"Exception during log insert: {e}")
-        print(f"Fallback: [LOG {level}] {message} {details or ''}")
+        print("Exception logging to Supabase:", e)
+        traceback.print_exc()
