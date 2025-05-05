@@ -1,0 +1,154 @@
+/* assets/styles.css */
+
+body {
+    background-color: #121212;
+    color: #FFFFFF;
+    font-family: 'Poppins', sans-serif;
+    margin: 0;
+    padding: 20px;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    color: #FFFFFF;
+    font-family: 'Poppins', sans-serif;
+}
+
+/* Style Dash components */
+.dash-dropdown, .dash-input, .dash-radioitems, .dash-checklist {
+    color: #333; /* Dropdown text color */
+}
+
+.Select-control, .Select-menu-outer, .Select--multi .Select-value {
+    background-color: #333333 !important;
+    color: #FFFFFF !important;
+    border: 1px solid #555555 !important;
+}
+
+.Select-control .Select-value-label, .Select-control .Select-placeholder {
+    color: #FFFFFF !important;
+}
+
+.VirtualizedSelectOption {
+    background-color: #333333 !important;
+    color: #FFFFFF !important;
+}
+
+.VirtualizedSelectOption.is-focused {
+    background-color: #555555 !important;
+}
+
+.VirtualizedSelectOption.is-selected {
+    background-color: #0d6efd !important;
+    color: white !important;
+}
+
+
+/* Style Tabs */
+.Tabs {
+    background-color: #2a2a2a;
+    border-bottom: 1px solid #444;
+}
+
+.Tab {
+    background-color: #2a2a2a;
+    color: #CCCCCC;
+    border: none !important;
+    border-bottom: 3px solid transparent !important;
+    padding: 15px !important;
+}
+
+.Tab--selected {
+    background-color: #121212;
+    color: #FFFFFF;
+    border-bottom: 3px solid #0d6efd !important;
+}
+
+/* Style KPI Cards */
+.kpi-card {
+    background-color: #2a2a2a;
+    padding: 20px;
+    margin: 10px;
+    border-radius: 5px;
+    text-align: center;
+    border: 1px solid #444;
+}
+
+.kpi-title {
+    font-size: 1em;
+    color: #CCCCCC;
+    margin-bottom: 10px;
+}
+
+.kpi-value {
+    font-size: 2em;
+    font-weight: bold;
+    color: #FFFFFF;
+}
+
+/* Specific KPI Colors */
+.kpi-atingido .kpi-value {
+    color: #28a745;
+}
+
+.kpi-violado .kpi-value {
+    color: #dc3545;
+}
+
+.kpi-risco .kpi-value {
+    color: #ffc107;
+}
+
+.kpi-aguardando .kpi-value {
+    color: #0d6efd;
+}
+
+/* Style Plotly graphs */
+.js-plotly-plot .plotly, .js-plotly-plot .plotly svg {
+    background-color: #121212 !important;
+}
+
+/* Style Dropdowns */
+.Select-control {
+    background-color: #333;
+    border: 1px solid #555;
+}
+.Select-input input {
+    color: #FFF;
+}
+.Select-value-label {
+    color: #FFF !important;
+}
+.Select--multi .Select-value {
+    background-color: #555;
+    color: #FFF;
+}
+.Select-menu-outer {
+    background-color: #333;
+    border: 1px solid #555;
+}
+.Select-option {
+    color: #FFF;
+}
+.Select-option.is-focused {
+    background-color: #555;
+}
+
+/* Style DatePicker */
+.DateInput_input, .DateInput_input__focused {
+    background-color: #333;
+    color: #FFF;
+    border-bottom: 1px solid #555;
+}
+.CalendarDay__selected, .CalendarDay__selected:active, .CalendarDay__selected:hover {
+    background: #0d6efd;
+    border: 1px double #0d6efd;
+    color: white;
+}
+.CalendarMonth_caption {
+    color: #FFF;
+}
+.DayPicker_weekHeader_li {
+    color: #CCC;
+}
+
+
