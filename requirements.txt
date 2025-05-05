@@ -42,3 +42,5 @@ zipp==3.21.0
 gunicorn
 
 dash-bootstrap-components
+
+supabase
