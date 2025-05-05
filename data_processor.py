@@ -11,8 +11,12 @@ def process_uploaded_files(piloto_bytes: bytes, sla_bytes: bytes) -> pd.DataFram
     Recebe bytes de XLSX para piloto e SLA,
     retorna DataFrame preparado.
     """
+    # Leitura e padronização de colunas
     df_piloto = pd.read_excel(io.BytesIO(piloto_bytes))
     df_sla = pd.read_excel(io.BytesIO(sla_bytes))
+    # Remove espaços em branco de cabeçalhos
+    df_piloto.columns = df_piloto.columns.str.strip()
+    df_sla.columns = df_sla.columns.str.strip()
 
     chave = "Chave"
     if chave not in df_piloto.columns or chave not in df_sla.columns:
@@ -25,11 +29,10 @@ def process_uploaded_files(piloto_bytes: bytes, sla_bytes: bytes) -> pd.DataFram
     # Mapeamentos de SLA
     sla_res_map = {"Baixa": 72, "Média": 24, "Alta": 8, "Crítica": 4}
     sla_1resp_map = {"Baixa": 24, "Média": 8, "Alta": 2, "Crítica": 1}
-
     df["SLA_Horas_Resolucao"] = df["Prioridade"].map(sla_res_map)
     df["SLA_Horas_Primeira_Resposta"] = df["Prioridade"].map(sla_1resp_map)
 
-    # Tempos calculados
+    # Cálculo de tempos
     df["HorasResolucao_Calculated"] = (
         pd.to_datetime(df["Data_Fecha"]) - pd.to_datetime(df["Data_Cria"])
     ).dt.total_seconds() / 3600
