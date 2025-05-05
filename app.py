@@ -131,13 +131,13 @@ app.layout = dbc.Container([
 
 # Process Uploaded Files and Upsert to Supabase
 @callback(
-    [Output(	"data-update-trigger	", "data"), # Trigger update by changing timestamp
-     Output(	"upload-status	", "children")],
-    [Input(	"process-button	", "n_clicks")],
-    [State(	"upload-piloto	", "contents"),
-     State(	"upload-piloto	", "filename"),
-     State(	"upload-sla	", "contents"),
-     State(	"upload-sla	", "filename")],
+    [Output("data-update-trigger", "data"),
+     Output("upload-status", "children")],
+    [Input("process-button", "n_clicks")],
+    [State("upload-piloto", "contents"),
+     State("upload-piloto", "filename"),
+     State("upload-sla", "contents"),
+     State("upload-sla", "filename")],
     prevent_initial_call=True
 )
 def process_and_upsert_data(n_clicks, piloto_contents, piloto_filename, sla_contents, sla_filename):
@@ -151,16 +151,25 @@ def process_and_upsert_data(n_clicks, piloto_contents, piloto_filename, sla_cont
                 print(f"Processed {df_processed.shape[0]} rows. Attempting Supabase upsert...")
                 upsert_success = supabase_client.upsert_tickets_data(df_processed)
                 if upsert_success:
-                    status_message = dbc.Alert(f"Arquivos 	"{piloto_filename}	" e 	"{sla_filename}	" processados e salvos no banco com sucesso! ({df_processed.shape[0]} linhas)", color="success")
+                    status_message = dbc.Alert(
+                        f'Arquivos "{piloto_filename}" e "{sla_filename}" processados e salvos no banco com sucesso! ({df_processed.shape[0]} linhas)',
+                        color="success"
+                    )
                     supabase_client.log_event("info", "File processing and Supabase upsert successful.", log_detail)
                     # Return current timestamp to trigger dashboard update
                     return {"timestamp": datetime.now().isoformat()}, status_message
                 else:
-                    status_message = dbc.Alert("Arquivos processados, mas falha ao salvar no banco de dados. Verifique os logs.", color="warning")
+                    status_message = dbc.Alert(
+                        "Arquivos processados, mas falha ao salvar no banco de dados. Verifique os logs.",
+                        color="warning"
+                    )
                     supabase_client.log_event("error", "File processing successful, but Supabase upsert failed.", log_detail)
-                    return dash.no_update, status_message # Don	 trigger update if save failed
+                    return dash.no_update, status_message
             else:
-                status_message = dbc.Alert("Falha no processamento dos arquivos. Verifique os logs ou o formato dos arquivos.", color="danger")
+                status_message = dbc.Alert(
+                    "Falha no processamento dos arquivos. Verifique os logs ou o formato dos arquivos.",
+                    color="danger"
+                )
                 supabase_client.log_event("error", "File processing failed.", log_detail)
                 return dash.no_update, status_message
         except Exception as e:
