@@ -1,120 +1,158 @@
 import os
 import io
 import base64
-import logging
 from datetime import datetime
 
 import dash
 import dash_bootstrap_components as dbc
 from dash import dcc, html, Input, Output, State, callback
-import pandas as pd
 
-from data_processor import process_uploaded_files
+import pandas as pd
+from data_processor import process_sla_file
 import supabase_client
 
-# Inicializa Supabase
+# ------------------------------------------------------------------------------
+# Inicialização do Supabase
+# ------------------------------------------------------------------------------
 supabase_client.init_supabase_client()
 
-# Busca inicial de tickets
-df_initial = supabase_client.fetch_all_tickets_data()
-if df_initial is None or (hasattr(df_initial, 'empty') and df_initial.empty):
-    logging.info('Nenhum ticket encontrado no Supabase ou tabela vazia.')
-
-# Cria app Dash
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.DARKLY], suppress_callback_exceptions=True)
+# ------------------------------------------------------------------------------
+# Layout do Dash
+# ------------------------------------------------------------------------------
+app = dash.Dash(
+    __name__,
+    external_stylesheets=[dbc.themes.BOOTSTRAP],
+    assets_folder="."
+)
 server = app.server
-supabase_client.log_event('info', 'Dashboard application starting.')
 
-# Layout
 app.layout = dbc.Container(fluid=True, children=[
-    dcc.Store(id='data-update-trigger', storage_type='memory'),
-    dbc.Row(dbc.Col(html.H1('Dashboard Executivo - Monitoramento de Suporte'), width=12)),
-    dbc.Row([
-        dbc.Col([
-            html.H4('Carregar Novos Dados'),
-            dcc.Upload(
-                id='upload-piloto',
-                children=html.Div(['Arraste ou ', html.A('Selecione o arquivo Piloto (.xlsx)')]),
-                style={
-                    'width': '100%', 'height': '60px', 'lineHeight': '60px',
-                    'borderWidth': '1px', 'borderStyle': 'dashed',
-                    'borderRadius': '5px', 'textAlign': 'center', 'margin': '10px 0'
-                },
-                multiple=False
-            ),
-            dcc.Upload(
-                id='upload-sla',
-                children=html.Div(['Arraste ou ', html.A('Selecione o arquivo SLA (.xlsx)')]),
-                style={
-                    'width': '100%', 'height': '60px', 'lineHeight': '60px',
-                    'borderWidth': '1px', 'borderStyle': 'dashed',
-                    'borderRadius': '5px', 'textAlign': 'center', 'margin': '10px 0'
-                },
-                multiple=False
-            ),
-            dbc.Button('Processar e Salvar no Banco', id='process-button', color='primary', className='mt-2'),
-            html.Div(id='upload-status', className='mt-2')
-        ], width=12)
-    ], className='mb-4'),
-    # Filtros
-    dbc.Row([
-        dbc.Col([html.Label('Projeto:'), dcc.Dropdown(id='project-dropdown', clearable=False)], md=3),
-        dbc.Col([html.Label('Tribo:'), dcc.Dropdown(id='tribo-dropdown', clearable=False)], md=3),
-        dbc.Col([
-            html.Label('Período:'),
-            dcc.Dropdown(
-                id='period-dropdown',
-                options=[
-                    {'label': 'Ano Inteiro', 'value': 'year'},
-                    {'label': 'Trimestre', 'value': 'quarter'},
-                    {'label': 'Mês', 'value': 'month'}
-                ],
-                value='month', clearable=False
-            )
-        ], md=2),
-        dbc.Col([html.Label('Selecionar Valor:'), dcc.Dropdown(id='period-value-dropdown')], md=4)
-    ], className='mb-4'),
-    # Abas
-    dbc.Tabs(id='tabs-main', active_tab='tab-visao-geral', children=[
-        dbc.Tab(label='Visão Geral', tab_id='tab-visao-geral'),
-        dbc.Tab(label='Desempenho SLA', tab_id='tab-sla-perf'),
-        dbc.Tab(label='Tempos e Status', tab_id='tab-tempos'),
-        dbc.Tab(label='Dados Detalhados', tab_id='tab-dados')
-    ]),
-    html.Div(id='tabs-content-main', className='mt-3')
+    html.H1("Dashboard Executivo – Monitoramento de SLA", className="mt-3 mb-4"),
+
+    # Upload único do SLA.xlsx
+    html.H5("Carregar nova versão do SLA"),
+    dcc.Upload(
+        id='upload-sla',
+        children=html.Div([
+            "Arraste ou ",
+            html.A("Selecione o arquivo SLA (.xlsx)")
+        ]),
+        style={
+            'width': '100%', 'height': '60px', 'lineHeight': '60px',
+            'borderWidth': '1px', 'borderStyle': 'dashed',
+            'borderRadius': '5px', 'textAlign': 'center',
+            'margin': '10px 0'
+        },
+        multiple=False
+    ),
+    dbc.Button('Processar e Salvar no Banco', id='process-button', color='primary'),
+    html.Div(id='upload-status', className='mt-2'),
+
+    html.Hr(),
+
+    # Dropdown de versões geradas
+    html.H5("Versões Disponíveis"),
+    dcc.Dropdown(
+        id='version-dropdown',
+        options=[],
+        placeholder="Selecione uma versão",
+        clearable=False
+    ),
+
+    html.Hr(),
+    html.Div(id='dashboard-content')
 ])
 
-# Callback de processamento e upsert
+# ------------------------------------------------------------------------------
+# Callbacks
+# ------------------------------------------------------------------------------
+
 @callback(
-    [Output('data-update-trigger', 'data'), Output('upload-status', 'children')],
+    Output('upload-status', 'children'),
+    Output('version-dropdown', 'options'),
     Input('process-button', 'n_clicks'),
-    State('upload-piloto', 'contents'), State('upload-piloto', 'filename'),
-    State('upload-sla', 'contents'), State('upload-sla', 'filename'),
+    State('upload-sla', 'contents'),
+    State('upload-sla', 'filename'),
     prevent_initial_call=True
 )
-def process_and_upsert(n_clicks, piloto_contents, piloto_filename, sla_contents, sla_filename):
-    if n_clicks and piloto_contents and sla_contents:
-        detail = {'piloto': piloto_filename, 'sla': sla_filename}
-        supabase_client.log_event('info', 'Iniciando processamento de arquivos', detail)
-        try:
-            df = process_uploaded_files(piloto_contents, sla_contents)
-            if df.empty:
-                raise ValueError('DataFrame processado está vazio')
-            ok = supabase_client.upsert_tickets_data(df)
-            if not ok:
-                raise RuntimeError('Falha ao inserir dados no Supabase')
-            msg = dbc.Alert(
-                f'Arquivos "{piloto_filename}" e "{sla_filename}" processados! Linhas: {df.shape[0]}',
-                color='success'
-            )
-            supabase_client.log_event('info', 'Processamento concluído', detail)
-            return {'triggered': datetime.utcnow().isoformat()}, msg
-        except Exception as e:
-            supabase_client.log_event('error', f'Erro no processamento: {e}', detail)
-            return dash.no_update, dbc.Alert(f'Erro: {e}', color='danger')
-    return dash.no_update, dash.no_update
+def upload_and_list_versions(n_clicks, sla_contents, sla_filename):
+    if not sla_contents:
+        return "Por favor, carregue um arquivo SLA (.xlsx) primeiro.", dash.no_update
 
-# Execução
+    try:
+        # 1) Processa o arquivo e retorna DataFrame
+        df = process_sla_file(sla_contents)
+
+        # 2) Upserta no Supabase e obtém version_id
+        version_id = supabase_client.upsert_sla(df)
+
+        # 3) Lista versões de volta ao dropdown
+        versions = supabase_client.fetch_sla_versions()
+        options = [
+            {"label": v["created_at"][:19].replace("T", " "), "value": v["id"]}
+            for v in versions
+        ]
+
+        msg = dbc.Alert(
+            f"Upload realizado! Versão criada: {version_id}",
+            color="success"
+        )
+        return msg, options
+
+    except Exception as e:
+        err = dbc.Alert(f"Erro no upload: {e}", color="danger")
+        return err, dash.no_update
+
+
+@callback(
+    Output('dashboard-content', 'children'),
+    Input('version-dropdown', 'value')
+)
+def render_dashboard(version_id):
+    if not version_id:
+        return html.P("Selecione uma versão para visualizar o dashboard.", className="text-muted")
+
+    # Busca dados da versão
+    df = supabase_client.fetch_sla_data(version_id)
+    if df.empty:
+        return html.P("Nenhum dado encontrado para esta versão.", className="text-warning")
+
+    # Cálculo rápido de KPIs
+    total = len(df)
+    atingidos = df["CumpriuSLA_Res"].sum()
+    violados = total - atingidos
+    em_risco = ((df["HorasResolução"] >= df["SLA_Horas"] * 0.8) & (df["CumpriuSLA_Res"]==False)).sum()
+    aguard = (df["Status"] == "Aguardando").sum()
+
+    cards = dbc.Row([
+        dbc.Col(dbc.Card(dbc.CardBody([
+            html.H5("% SLA Atingido"),
+            html.H2(f"{atingidos/total:.0%}", className="text-success")
+        ])), md=3),
+        dbc.Col(dbc.Card(dbc.CardBody([
+            html.H5("% SLA Violado"),
+            html.H2(f"{violados/total:.0%}", className="text-danger")
+        ])), md=3),
+        dbc.Col(dbc.Card(dbc.CardBody([
+            html.H5("Em Risco"),
+            html.H2(f"{em_risco}", className="text-warning")
+        ])), md=3),
+        dbc.Col(dbc.Card(dbc.CardBody([
+            html.H5("Aguardando"),
+            html.H2(f"{aguard}", className="text-primary")
+        ])), md=3),
+    ], className="mb-4")
+
+    # Exemplo de tabela de preview (você pode trocar por gráficos Plotly)
+    table = dbc.Table.from_dataframe(
+        df[["Chave","Projeto","Prioridade","HorasResolução","SLA_Horas","CumpriuSLA_Res"]].head(20),
+        striped=True, bordered=True, hover=True, responsive=True
+    )
+
+    return html.Div([cards, table])
+
+# ------------------------------------------------------------------------------
+# Main
+# ------------------------------------------------------------------------------
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8050))
-    app.run_server(host='0.0.0.0', port=port)
+    app.run_server(debug=True, port=int(os.environ.get("PORT", 8050)))

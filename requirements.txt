@@ -44,3 +44,10 @@ gunicorn
 dash-bootstrap-components
 
 supabase
+dash
+dash-bootstrap-components
+pandas
+openpyxl
+supabase==1.0.0
+python-dotenv
+
