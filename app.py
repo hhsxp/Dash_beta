@@ -1,53 +1,77 @@
-# app.py
-import logging
-import pandas as pd
-from flask import Flask
+import io
+import os
+import base64
 import dash
 from dash import dcc, html, Input, Output, State
-
-import supabase_client
+import dash_bootstrap_components as dbc
+import pandas as pd
+from supabase_client import init_supabase_client, supabase_client, log_event
 from data_processor import process_uploaded_files
 
-# Inicializa logs e Supabase
-logging.basicConfig(level=logging.INFO)
-supabase_client.init_supabase_client()
+# Inicializa Supabase
+init_supabase_client()
 
-# Busca inicial de dados (DataFrame)
-df_initial = supabase_client.fetch_all_tickets_data()
-if df_initial.empty:
-    logging.info("Nenhum ticket encontrado no Supabase ou tabela vazia.")
+# Carrega dados iniciais (pode retornar DataFrame vazio)
+try:
+    df_initial = supabase_client.fetch_all_tickets_data()
+except Exception as e:
+    log_event("error", f"Erro ao buscar dados iniciais: {e}")
+    df_initial = pd.DataFrame()
 
-# Cria app Flask + Dash
-server = Flask(__name__)
-app = dash.Dash(__name__, server=server)
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+server = app.server
 
-# Layout mínimo de exemplo
-app.layout = html.Div([
-    dcc.Upload(id='upload-piloto', children=html.Div('Arraste ou selecione o Arquivo Piloto (.xlsx)')),
-    dcc.Upload(id='upload-sla', children=html.Div('Arraste ou selecione o Arquivo SLA (.xlsx)')),
-    html.Button('Processar e Salvar no Banco', id='process-btn'),
-    html.Div(id='output-msg')
-])
+app.layout = dbc.Container([
+    html.H1("Dashboard Executivo - Monitoramento de Suporte", className="mt-4 mb-4 text-light"),
+    dcc.Upload(
+        id='upload-piloto',
+        children=html.Div(['Arraste ou selecione o Arquivo Piloto (.xlsx)']),
+        className='upload-box'
+    ),
+    dcc.Upload(
+        id='upload-sla',
+        children=html.Div(['Arraste ou selecione o Arquivo SLA (.xlsx)']),
+        className='upload-box'
+    ),
+    dbc.Button("Processar e Salvar no Banco", id='process-btn', color='primary', className='mt-2 mb-2'),
+    dbc.Alert(id='alert-error', is_open=False, color='danger'),
+    # Demais componentes (dropdowns, gráficos, etc.)
+], fluid=True, className="bg-dark text-white")
 
 @app.callback(
-    Output('output-msg', 'children'),
+    Output('alert-error', 'children'),
+    Output('alert-error', 'is_open'),
     Input('process-btn', 'n_clicks'),
     State('upload-piloto', 'contents'),
     State('upload-sla', 'contents'),
-    prevent_initial_call=True
 )
 def handle_upload(n_clicks, piloto_contents, sla_contents):
-    supabase_client.log_event('info', 'Processamento iniciado', {'piloto': bool(piloto_contents), 'sla': bool(sla_contents)})
-    if not piloto_contents or not sla_contents:
-        return 'Selecione ambos os arquivos antes de processar.'
+    if not n_clicks:
+        return '', False
     try:
-        df = process_uploaded_files(piloto_contents, sla_contents)
-        records = df.to_dict(orient='records')
-        resp = supabase_client.supabase_client.table('tickets').insert(records).execute()
-        if getattr(resp, 'status_code', None) != 201:
-            raise ValueError(f"Falha ao inserir no Supabase: {getattr(resp, 'data', resp)}")
-        supabase_client.log_event('info', 'Dados inseridos', {'count': len(records)})
-        return f"Sucesso: {len(records)} tickets inseridos."
+        # Extrai bytes dos uploads
+        piloto_bytes = base64.b64decode(piloto_contents.split(',')[1])
+        sla_bytes    = base64.b64decode(sla_contents.split(',')[1])
+
+        log_event("info", "Processing files start.", details={"piloto": piloto_contents[:50], "sla": sla_contents[:50]})
+
+        # Processa
+        df = process_uploaded_files(piloto_bytes, sla_bytes)
+
+        # Salva no banco
+        response = supabase_client.table('tickets').insert(df.to_dict('records')).execute()
+        if response.status_code != 201:
+            raise RuntimeError(f"Falha ao inserir no Supabase: {response.data}")
+
+        log_event("info", "Files processed and saved.")
+        return '', False
+
+    except ValueError as ve:
+        log_event("error", f"Validation error: {ve}")
+        return f"Erro: {ve}", True
     except Exception as e:
-        supabase_client.log_event('error', f'Erro no processamento: {e}')
-        return f"Erro: {e}"
+        log_event("error", f"Error in processing: {e}")
+        return "Erro no processamento. Verifique os logs ou o formato dos arquivos.", True
+
+if __name__ == '__main__':
+    app.run_server(debug=True, port=int(os.environ.get('PORT', 8050)))
