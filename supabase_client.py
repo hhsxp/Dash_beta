@@ -1,9 +1,12 @@
+### supabase_client.py
+```python
 import os
 import logging
 from datetime import datetime
+import pandas as pd
 from supabase import create_client, Client
 
-# Carrega URL e KEY do Supabase das variáveis de ambiente
+# Carrega URL e KEY do Supabase das env vars
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
@@ -22,6 +25,13 @@ def init_supabase_client() -> None:
     supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
     logging.info("Supabase client inicializado com sucesso.")
 
+    # Opcional: testar conexão
+    try:
+        supabase_client.table("dashboard_logs").select("id").limit(1).execute()
+    except Exception as e:
+        logging.error(f"Falha ao conectar no Supabase: {e}")
+
+
 def log_event(level: str, message: str, details: dict | None = None) -> None:
     """
     Insere um registro na tabela `dashboard_logs`.
@@ -36,22 +46,25 @@ def log_event(level: str, message: str, details: dict | None = None) -> None:
         "timestamp": datetime.now().isoformat()
     }
     resp = supabase_client.table("dashboard_logs").insert(payload).execute()
-    # no client v2, resp é APIResponse; status_code 201 == sucesso
-    if getattr(resp, "status_code", None) != 201:
-        logging.error(f"Falha ao logar evento: {getattr(resp, 'data', resp)}")
+    status = getattr(resp, 'status_code', None)
+    if status != 201:
+        logging.error(f"Falha ao logar evento (status {status}): {getattr(resp, 'data', resp)}")
     else:
         logging.info("Evento logado com sucesso.")
 
-def fetch_all_tickets_data() -> list[dict]:
+
+def fetch_all_tickets_data() -> pd.DataFrame:
     """
-    Busca todos os registros da tabela `tickets`.
-    Retorna lista de dicts, ou [] em caso de erro.
+    Busca todos os registros da tabela `tickets` e retorna um DataFrame.
     """
     if supabase_client is None:
         logging.warning("Supabase client não inicializado. fetch_all_tickets_data retorna vazio.")
-        return []
+        return pd.DataFrame()
     resp = supabase_client.table("tickets").select("*").execute()
-    if getattr(resp, "status_code", None) != 200:
-        logging.warning(f"Falha ao buscar tickets: {getattr(resp, 'data', resp)}")
-        return []
-    return resp.data  # já é uma lista de dicts
+    status = getattr(resp, 'status_code', None)
+    if status != 200:
+        logging.warning(f"Falha ao buscar tickets (status {status}): {getattr(resp, 'data', resp)}")
+        return pd.DataFrame()
+    # Converte lista de dicts para DataFrame
+    return pd.DataFrame(resp.data)
+```
