@@ -1,67 +1,46 @@
-# supabase_client.py
 import os
 import logging
-from datetime import datetime
-import pandas as pd
 from supabase import create_client, Client
+from datetime import datetime
 
-# Carrega URL e KEY do Supabase das env vars
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase: Client | None = None
 
-# Cliente global
-supabase_client: Client | None = None
+logger = logging.getLogger(__name__)
 
 def init_supabase_client() -> None:
-    """
-    Inicializa o supabase_client global.
-    Chame esta função antes de usar log_event ou fetch_all_tickets_data.
-    """
-    global supabase_client
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        logging.error("SUPABASE_URL ou SUPABASE_KEY não definidos nas env vars.")
-        return
-    supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    logging.info("Supabase client inicializado com sucesso.")
+    global supabase
+    if SUPABASE_URL and SUPABASE_KEY:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        logger.info("Supabase client inicializado.")
+    else:
+        logger.error("SUPABASE_URL ou SUPABASE_KEY não definidos nas env vars.")
+        supabase = None
 
-    # Testa conexão básica
-    try:
-        supabase_client.table("dashboard_logs").select("id").limit(1).execute()
-    except Exception as e:
-        logging.error(f"Falha ao conectar no Supabase: {e}")
-
+def fetch_all_tickets_data() -> list[dict]:
+    """Retorna lista de dicionários com todos os tickets."""
+    if not supabase:
+        logger.warning("Supabase client não inicializado. fetch retorna vazio.")
+        return []
+    resp = supabase.table("tickets").select("*").execute()
+    if resp.status_code != 200:
+        logger.error("Erro ao buscar dados iniciais: %s", resp.error_message if hasattr(resp, "error_message") else resp.data)
+        return []
+    return resp.data or []
 
 def log_event(level: str, message: str, details: dict | None = None) -> None:
-    """
-    Insere um registro na tabela dashboard_logs.
-    """
-    if supabase_client is None:
-        logging.warning("Supabase client não inicializado. Ignorando log_event.")
+    """Insere um log na tabela dashboard_logs."""
+    if not supabase:
+        logger.warning("Falha ao logar evento (%s): supabase não inicializado", level)
         return
     payload = {
+        "timestamp": datetime.utcnow().isoformat(),
         "level": level,
         "message": message,
         "details": details or {},
-        "timestamp": datetime.now().isoformat()
     }
-    resp = supabase_client.table("dashboard_logs").insert(payload).execute()
-    status = getattr(resp, 'status_code', None)
-    if status != 201:
-        logging.error(f"Falha ao logar evento (status {status}): {getattr(resp, 'data', resp)}")
-    else:
-        logging.info("Evento logado com sucesso.")
-
-
-def fetch_all_tickets_data() -> pd.DataFrame:
-    """
-    Busca todos os registros da tabela tickets e retorna um DataFrame.
-    """
-    if supabase_client is None:
-        logging.warning("Supabase client não inicializado. fetch_all_tickets_data retorna vazio.")
-        return pd.DataFrame()
-    resp = supabase_client.table("tickets").select("*").execute()
-    status = getattr(resp, 'status_code', None)
-    if status != 200:
-        logging.warning(f"Falha ao buscar tickets (status {status}): {getattr(resp, 'data', resp)}")
-        return pd.DataFrame()
-    return pd.DataFrame(resp.data)
+    resp = supabase.table("dashboard_logs").insert(payload).execute()
+    # checagem genérica de HTTP 2xx
+    if not (200 <= resp.status_code < 300):
+        logger.error("Falha ao logar evento (status %s): %s", resp.status_code, resp.data)

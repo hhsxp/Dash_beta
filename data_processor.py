@@ -1,34 +1,33 @@
+import base64
+import io
 import pandas as pd
-from io import BytesIO
+from typing import Tuple
 
-def process_uploaded_files(piloto_contents: bytes | str, sla_contents: bytes | str) -> pd.DataFrame:
+def process_uploaded_files(piloto_b64: str, sla_b64: str) -> pd.DataFrame:
     """
-    Recebe os conteúdos brutos (bytes ou string) dos dois arquivos .xlsx,
-    faz a leitura, valida presença de coluna 'Chave', faz merge e devolve o DataFrame resultante.
-    Lança ValueError com mensagem apropriada em caso de qualquer problema.
+    Recebe conteúdos Base64 dos dois arquivos,
+    retorna DataFrame unificado e tratado.
+    Lança ValueError em caso de colunas faltantes ou merge vazio.
     """
-    # Se recebeu string, converte para bytes (upload via Dash às vezes vem como str)
-    piloto_bytes = piloto_contents.encode('latin1') if isinstance(piloto_contents, str) else piloto_contents
-    sla_bytes    = sla_contents.encode('latin1')    if isinstance(sla_contents, str)    else sla_contents
+    def _decode_and_read(b64: str) -> pd.DataFrame:
+        header, encoded = b64.split(",", 1)
+        raw = base64.b64decode(encoded)
+        return pd.read_excel(io.BytesIO(raw), engine="openpyxl")
 
-    try:
-        df_piloto = pd.read_excel(BytesIO(piloto_bytes))
-        df_sla    = pd.read_excel(BytesIO(sla_bytes))
-    except Exception as e:
-        raise ValueError(f"Erro ao ler planilhas Excel: {e}")
+    df_piloto = _decode_and_read(piloto_b64)
+    df_sla = _decode_and_read(sla_b64)
 
-    # Validação de coluna 'Chave'
-    for df, nome in [(df_piloto, "Piloto"), (df_sla, "SLA")]:
-        if "Chave" not in df.columns:
-            raise ValueError("Coluna 'Chave' ausente em um dos arquivos")
+    # checagem de coluna chave
+    if "Chave" not in df_piloto.columns or "Chave" not in df_sla.columns:
+        raise ValueError("Coluna 'Chave' ausente em um dos arquivos")
 
-    # Merge inner na coluna 'Chave'
-    df_merged = pd.merge(df_piloto, df_sla, on="Chave", how="inner", suffixes=('_piloto', '_sla'))
-    if df_merged.empty:
-        raise ValueError("Nenhum ticket encontrado após o merge. Verifique se há correspondências em 'Chave'.")
+    # merge e validação
+    df = df_piloto.merge(df_sla, on="Chave", how="inner", suffixes=("_piloto","_sla"))
+    if df.empty:
+        raise ValueError("Nenhum ticket encontrado após o merge. Verifique coluna 'Chave'")
 
-    # Aqui você pode adicionar normalizações, conversão de tipos, datas, etc.
-    # Por exemplo:
-    # df_merged["DataCriacao"] = pd.to_datetime(df_merged["DataCriacao"], dayfirst=True)
+    # aqui você adiciona todos os tratamentos de data, numéricos, categorizações etc.
+    # Exemplo:
+    # df["LeadTimeHoras"] = (df["Data_Resposta"] - df["Data_Criacao"]).dt.total_seconds() / 3600
 
-    return df_merged
+    return df
