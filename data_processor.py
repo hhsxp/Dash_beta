@@ -1,61 +1,35 @@
-import pandas as pd
+# data_processor.py
 import io
 import base64
+import pandas as pd
 
 
-def process_uploaded_files(piloto_content: str, sla_content: str) -> pd.DataFrame:
+def process_uploaded_files(piloto_bytes: bytes, sla_bytes: bytes) -> pd.DataFrame:
     """
-    Receives the contents of the uploaded 'piloto' and 'sla' files (as base64 strings), decodes and reads them,
-    validates presence of the 'Chave' column, merges them, and returns a processed DataFrame.
+    Recebe os bytes decodificados dos arquivos XLSX de Piloto e SLA,
+    verifica a existência da coluna 'Chave', faz merge e retorna
+    o DataFrame combinado.
     """
-    # Decodifica o conteúdo base64 e lê em DataFrame
-    try:
-        piloto_header, piloto_b64 = piloto_content.split(",", 1)
-        sla_header, sla_b64 = sla_content.split(",", 1)
-    except ValueError:
-        raise ValueError("Conteúdo de upload inválido: não contém cabeçalho base64 esperado.")
-
-    piloto_bytes = base64.b64decode(piloto_b64)
-    sla_bytes = base64.b64decode(sla_b64)
-
     # Leitura dos arquivos Excel
     df_piloto = pd.read_excel(io.BytesIO(piloto_bytes))
     df_sla = pd.read_excel(io.BytesIO(sla_bytes))
 
-    # Limpa espaços em branco nos nomes das colunas
-    df_piloto.columns = df_piloto.columns.str.strip()
-    df_sla.columns = df_sla.columns.str.strip()
+    # Verifica presença da coluna 'Chave'
+    missing = []
+    for name, df in [("Piloto", df_piloto), ("SLA", df_sla)]:
+        if "Chave" not in df.columns:
+            missing.append(name)
+    if missing:
+        raise ValueError(f"Coluna 'Chave' ausente em: {', '.join(missing)}")
 
-    # Confirma se a coluna 'Chave' existe em ambos
-    missing_p = 'Chave' not in df_piloto.columns
-    missing_s = 'Chave' not in df_sla.columns
-    if missing_p or missing_s:
-        cols_p = list(df_piloto.columns)
-        cols_s = list(df_sla.columns)
-        msg_parts = []
-        if missing_p:
-            msg_parts.append(f"Arquivo Piloto colunas={cols_p}")
-        if missing_s:
-            msg_parts.append(f"Arquivo SLA colunas={cols_s}")
-        raise ValueError("Coluna 'Chave' ausente: " + "; ".join(msg_parts))
-
-    # Faz o merge
-    df_merged = pd.merge(df_piloto, df_sla, on='Chave', how='inner')
+    # Merge interno pela chave
+    df_merged = pd.merge(df_piloto, df_sla, on="Chave", how="inner")
     if df_merged.empty:
-        raise ValueError("Nenhum ticket encontrado após o merge. Verifique se a coluna 'Chave' existe e coincide em ambos arquivos.")
+        raise ValueError(
+            "Nenhum ticket encontrado após o merge. "
+            "Verifique se a coluna 'Chave' coincide em ambos os arquivos."
+        )
 
-    # Aqui você pode adicionar transformações adicionais, por exemplo:
-    # - Conversão de datas: df_merged['Data'] = pd.to_datetime(df_merged['Data'], dayfirst=True)
-    # - Cálculo de métricas
+    # (Opcional) Tratamentos adicionais podem ser aplicados aqui
 
     return df_merged
-
-
-# Exemplo de teste local (remover antes do deploy):
-# if __name__ == '__main__':
-#     with open('Piloto.xlsx', 'rb') as f:
-#         piloto = base64.b64encode(f.read()).decode()
-#     with open('SLA.xlsx', 'rb') as f:
-#         sla = base64.b64encode(f.read()).decode()
-#     df = process_uploaded_files(f"data:;base64,{piloto}", f"data:;base64,{sla}")
-#     print(df.head())
