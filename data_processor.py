@@ -1,33 +1,51 @@
+# data_processor.py
+
+import pandas as pd
 import base64
 import io
-import pandas as pd
-from typing import Tuple
 
-def process_uploaded_files(piloto_b64: str, sla_b64: str) -> pd.DataFrame:
+def _parse_uploaded_excel(content: str) -> pd.DataFrame:
     """
-    Recebe conteúdos Base64 dos dois arquivos,
-    retorna DataFrame unificado e tratado.
-    Lança ValueError em caso de colunas faltantes ou merge vazio.
+    Recebe o content vindo do dcc.Upload (string 'data:...;base64,<dados>'),
+    decodifica e retorna um DataFrame.
     """
-    def _decode_and_read(b64: str) -> pd.DataFrame:
-        header, encoded = b64.split(",", 1)
-        raw = base64.b64decode(encoded)
-        return pd.read_excel(io.BytesIO(raw), engine="openpyxl")
+    if not content:
+        return pd.DataFrame()
+    # separa header de dados
+    try:
+        header, b64 = content.split(",", 1)
+    except ValueError:
+        raise ValueError("Conteúdo inválido: não foi possível encontrar a parte base64.")
+    # decodifica e lê
+    decoded = base64.b64decode(b64)
+    return pd.read_excel(io.BytesIO(decoded), engine="openpyxl")
 
-    df_piloto = _decode_and_read(piloto_b64)
-    df_sla = _decode_and_read(sla_b64)
+def process_uploaded_files(
+    piloto_content: str | None,
+    sla_content: str | None
+) -> pd.DataFrame:
+    """
+    Processa as duas planilhas (Piloto e SLA) e retorna o DataFrame final.
+    Erra se faltar coluna 'Chave' ou se o merge resultar em DataFrame vazio.
+    """
+    # carrega cada planilha
+    df_piloto = _parse_uploaded_excel(piloto_content or "")
+    df_sla = _parse_uploaded_excel(sla_content or "")
 
-    # checagem de coluna chave
+    # verifica existência da coluna chave
     if "Chave" not in df_piloto.columns or "Chave" not in df_sla.columns:
         raise ValueError("Coluna 'Chave' ausente em um dos arquivos")
 
-    # merge e validação
-    df = df_piloto.merge(df_sla, on="Chave", how="inner", suffixes=("_piloto","_sla"))
-    if df.empty:
-        raise ValueError("Nenhum ticket encontrado após o merge. Verifique coluna 'Chave'")
+    # faz merge inner
+    df = pd.merge(df_piloto, df_sla, on="Chave", how="inner")
 
-    # aqui você adiciona todos os tratamentos de data, numéricos, categorizações etc.
-    # Exemplo:
-    # df["LeadTimeHoras"] = (df["Data_Resposta"] - df["Data_Criacao"]).dt.total_seconds() / 3600
+    if df.empty:
+        raise ValueError(
+            "Nenhum ticket encontrado após o merge. "
+            "Verifique se a coluna 'Chave' existe e coincide em ambos arquivos."
+        )
+
+    # aqui você pode aplicar as transformações adicionais
+    # ex: renomear colunas, converter tipos, preencher valores default...
 
     return df
