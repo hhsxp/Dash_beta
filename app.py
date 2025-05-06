@@ -1,5 +1,4 @@
-### app.py
-```python
+# app.py
 import logging
 import pandas as pd
 from flask import Flask
@@ -10,7 +9,7 @@ import supabase_client
 from data_processor import process_uploaded_files
 
 # Inicializa logs e Supabase
-type logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO)
 supabase_client.init_supabase_client()
 
 # Busca inicial de dados (DataFrame)
@@ -30,19 +29,19 @@ app.layout = html.Div([
     html.Div(id='output-msg')
 ])
 
-@dash.callback(
+@app.callback(
     Output('output-msg', 'children'),
     Input('process-btn', 'n_clicks'),
     State('upload-piloto', 'contents'),
-    State('upload-sla', 'contents')
+    State('upload-sla', 'contents'),
+    prevent_initial_call=True
 )
 def handle_upload(n_clicks, piloto_contents, sla_contents):
-    if not n_clicks:
-        return ''
-    supabase_client.log_event('info', 'Processamento iniciado', {'piloto': piloto_contents and 'ok', 'sla': sla_contents and 'ok'})
+    supabase_client.log_event('info', 'Processamento iniciado', {'piloto': bool(piloto_contents), 'sla': bool(sla_contents)})
+    if not piloto_contents or not sla_contents:
+        return 'Selecione ambos os arquivos antes de processar.'
     try:
         df = process_uploaded_files(piloto_contents, sla_contents)
-        # Aqui: salvar df no Supabase
         records = df.to_dict(orient='records')
         resp = supabase_client.supabase_client.table('tickets').insert(records).execute()
         if getattr(resp, 'status_code', None) != 201:
@@ -52,6 +51,3 @@ def handle_upload(n_clicks, piloto_contents, sla_contents):
     except Exception as e:
         supabase_client.log_event('error', f'Erro no processamento: {e}')
         return f"Erro: {e}"
-
-if __name__ == '__main__':
-    app.run(debug=True)

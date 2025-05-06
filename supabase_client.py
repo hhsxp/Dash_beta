@@ -1,5 +1,4 @@
-### supabase_client.py
-```python
+# supabase_client.py
 import os
 import logging
 from datetime import datetime
@@ -25,7 +24,7 @@ def init_supabase_client() -> None:
     supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
     logging.info("Supabase client inicializado com sucesso.")
 
-    # Opcional: testar conexão
+    # Testa conexão básica
     try:
         supabase_client.table("dashboard_logs").select("id").limit(1).execute()
     except Exception as e:
@@ -34,7 +33,7 @@ def init_supabase_client() -> None:
 
 def log_event(level: str, message: str, details: dict | None = None) -> None:
     """
-    Insere um registro na tabela `dashboard_logs`.
+    Insere um registro na tabela dashboard_logs.
     """
     if supabase_client is None:
         logging.warning("Supabase client não inicializado. Ignorando log_event.")
@@ -55,7 +54,7 @@ def log_event(level: str, message: str, details: dict | None = None) -> None:
 
 def fetch_all_tickets_data() -> pd.DataFrame:
     """
-    Busca todos os registros da tabela `tickets` e retorna um DataFrame.
+    Busca todos os registros da tabela tickets e retorna um DataFrame.
     """
     if supabase_client is None:
         logging.warning("Supabase client não inicializado. fetch_all_tickets_data retorna vazio.")
@@ -65,6 +64,4 @@ def fetch_all_tickets_data() -> pd.DataFrame:
     if status != 200:
         logging.warning(f"Falha ao buscar tickets (status {status}): {getattr(resp, 'data', resp)}")
         return pd.DataFrame()
-    # Converte lista de dicts para DataFrame
     return pd.DataFrame(resp.data)
-```
