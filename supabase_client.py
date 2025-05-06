@@ -1,55 +1,57 @@
-# supabase_client.py
 import os
-from supabase import create_client, Client
 import logging
 from datetime import datetime
+from supabase import create_client, Client
 
-# Inicialização do client Supabase
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-supabase: Client = None
+# Carrega URL e KEY do Supabase das variáveis de ambiente
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-def init_supabase():
-    global supabase
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+# Cliente global
+supabase_client: Client | None = None
 
-
-def log_event(level: str, message: str, details: dict = None):
+def init_supabase_client() -> None:
     """
-    Registra um evento na tabela 'dashboard_logs'.
+    Inicializa o supabase_client global.
+    Chame esta função antes de usar log_event ou fetch_all_tickets_data.
     """
-    if supabase is None:
-        logging.warning("Supabase client not initialized. Cannot log event.")
+    global supabase_client
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        logging.error("SUPABASE_URL ou SUPABASE_KEY não definidos nas env vars.")
         return
-    event = {
-        "timestamp": datetime.now().isoformat(),
+    supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    logging.info("Supabase client inicializado com sucesso.")
+
+def log_event(level: str, message: str, details: dict | None = None) -> None:
+    """
+    Insere um registro na tabela `dashboard_logs`.
+    """
+    if supabase_client is None:
+        logging.warning("Supabase client não inicializado. Ignorando log_event.")
+        return
+    payload = {
         "level": level,
         "message": message,
-        "details": details or {}
+        "details": details or {},
+        "timestamp": datetime.now().isoformat()
     }
-    resp = supabase.table("dashboard_logs").insert(event).execute()
-    if resp.status_code >= 300:
-        logging.error(f"Failed to log event: {resp.data}")
+    resp = supabase_client.table("dashboard_logs").insert(payload).execute()
+    # no client v2, resp é APIResponse; status_code 201 == sucesso
+    if getattr(resp, "status_code", None) != 201:
+        logging.error(f"Falha ao logar evento: {getattr(resp, 'data', resp)}")
+    else:
+        logging.info("Evento logado com sucesso.")
 
-
-def fetch_all_tickets_data():
+def fetch_all_tickets_data() -> list[dict]:
     """
-    Busca todos os registros da tabela 'tickets'.
+    Busca todos os registros da tabela `tickets`.
+    Retorna lista de dicts, ou [] em caso de erro.
     """
-    if supabase is None:
-        logging.warning("Supabase client not initialized. Cannot fetch data.")
+    if supabase_client is None:
+        logging.warning("Supabase client não inicializado. fetch_all_tickets_data retorna vazio.")
         return []
-    resp = supabase.table("tickets").select("*").execute()
-    return resp.data
-
-
-def insert_tickets_data(rows: list):
-    """
-    Insere uma lista de dicionários na tabela 'tickets'.
-    """
-    if supabase is None:
-        logging.warning("Supabase client not initialized. Cannot insert data.")
-        return
-    resp = supabase.table("tickets").insert(rows).execute()
-    if resp.status_code >= 300:
-        logging.error(f"Failed to insert tickets: {resp.data}")
+    resp = supabase_client.table("tickets").select("*").execute()
+    if getattr(resp, "status_code", None) != 200:
+        logging.warning(f"Falha ao buscar tickets: {getattr(resp, 'data', resp)}")
+        return []
+    return resp.data  # já é uma lista de dicts
